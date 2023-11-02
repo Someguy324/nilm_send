@@ -1,0 +1,85 @@
+import tensorflow as tf
+import os
+
+from train_model.network.attention.attention_point import create_attention_concat_point
+from train_model.network.attention.attention_seq import create_attention_concat_seq
+from train_model.network.concat.concatenate_net import create_concatenate
+from train_model.network.attention.attention_origin import create_attention_origin
+
+tf.random.set_seed(120)
+
+
+def model_select(input_window_length, model_type, appliance_count, predict_mode):
+    if model_type == 'cnn':
+        input_layer = tf.keras.layers.Input(shape=(input_window_length, 1))
+        reshape_layer = tf.keras.layers.Reshape((1, input_window_length, 1))(input_layer)
+        conv_layer_1 = tf.keras.layers.Convolution2D(filters=30, kernel_size=(10, 1), strides=(1, 1), padding="same",
+                                                     activation="relu")(reshape_layer)
+        conv_layer_2 = tf.keras.layers.Convolution2D(filters=30, kernel_size=(8, 1), strides=(1, 1), padding="same",
+                                                     activation="relu")(conv_layer_1)
+        conv_layer_3 = tf.keras.layers.Convolution2D(filters=40, kernel_size=(6, 1), strides=(1, 1), padding="same",
+                                                     activation="relu")(conv_layer_2)
+        conv_layer_4 = tf.keras.layers.Convolution2D(filters=50, kernel_size=(5, 1), strides=(1, 1), padding="same",
+                                                     activation="relu")(conv_layer_3)
+        conv_layer_5 = tf.keras.layers.Convolution2D(filters=50, kernel_size=(5, 1), strides=(1, 1), padding="same",
+                                                     activation="relu")(conv_layer_4)
+        flatten_layer = tf.keras.layers.Flatten()(conv_layer_5)
+        label_layer = tf.keras.layers.Dense(1024, activation="relu")(flatten_layer)
+        output_layer = tf.keras.layers.Dense(appliance_count, activation="linear")(label_layer)
+        model = tf.keras.Model(inputs=input_layer, outputs=output_layer)
+        return model
+
+    if model_type == 'lstm':
+        input_layer = tf.keras.layers.Input(shape=(input_window_length, 1))
+        conv1d_layer = tf.keras.layers.Conv1D(filters=32, kernel_size=5, padding='same', activation='relu')(input_layer)
+        maxpool_layer = tf.keras.layers.MaxPooling1D(3)(conv1d_layer)
+        conv1d_layer = tf.keras.layers.Conv1D(filters=32, kernel_size=5, padding='same', activation='relu')(maxpool_layer)
+        lstm_layer = tf.keras.layers.LSTM(32, dropout=0.1)(conv1d_layer)
+        if predict_mode == 'multi_label':
+            dense_layer = tf.keras.layers.Dense(appliance_count, activation="sigmoid")(lstm_layer)
+        else:
+            dense_layer = tf.keras.layers.Dense(appliance_count, activation='linear')(lstm_layer)
+        model = tf.keras.Model(inputs=input_layer, outputs=dense_layer)
+        return model
+
+    if model_type == 'concat':
+        return create_concatenate(input_window_length, appliance_count, predict_mode)
+
+    if model_type == 'attention_seq':
+        # full_model, model_weight = create_attention(input_window_length)
+        full_model = create_attention_concat_seq(input_window_length)
+        return full_model
+    if model_type == 'attention_point':
+        return create_attention_concat_point(input_window_length)
+    if model_type == "attention_origin":
+        full_model, attention_model = create_attention_origin(input_window_length)
+        return full_model, attention_model
+
+
+def save_model(model, save_model_dir, model_type):
+    model_path = save_model_dir
+    if not os.path.exists(model_path):
+        open(model_path, 'a').close()
+    if model_type == "attention_seq" or model_type == 'attention_point' or model_type == 'attention_origin':
+        model.save_weights(model_path, overwrite=True)
+    else:
+        model.save(model_path, overwrite=True)
+
+
+def load_model(saved_model_dir, model_type, input_window_length):
+    print("PATH NAME: ", saved_model_dir)
+    if model_type == "attention_seq":
+        # model, model_weight = create_attention(input_window_length)
+        model = create_attention_concat_seq(input_window_length)
+        model.load_weights(saved_model_dir)
+    elif model_type == 'attention_point':
+        model = create_attention_concat_point(input_window_length)
+        model.load_weights(saved_model_dir)
+    elif model_type == 'attention_origin':
+        model, attention_model = create_attention_origin(input_window_length)
+        model.load_weights(saved_model_dir)
+    else:
+        model = tf.keras.models.load_model(saved_model_dir)
+        num_of_weights = model.count_params()
+        print("Loaded model with ", str(num_of_weights), " weights")
+    return model
